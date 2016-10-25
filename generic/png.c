@@ -2,6 +2,7 @@
 #define TH_GENERIC_FILE "generic/png.c"
 #else
 
+
 /*
  * Copyright 2002-2010 Guillaume Cottenceau.
  *
@@ -11,27 +12,176 @@
  * Clement: modified for Torch7.
  */
 
+#include <png.h>
+#include <string.h>
+#include <lualib.h>
+
+static const int PNG_HEADER_BYTES;
+
+typedef struct libpng_(SMemoryReader)
+{
+    size_t len;
+    const char *data;
+    size_t offset;
+} libpng_(MemoryReader), *libpng_(PMemoryReader);
+
+libpng_(PMemoryReader) libpng_(new_memory_reader)(const char *data, size_t len)
+{
+    libpng_(PMemoryReader) result = (libpng_(PMemoryReader)) malloc(sizeof(libpng_(MemoryReader)));
+    result->len = len;
+    result->data = data;
+    result->offset = PNG_HEADER_BYTES;
+    return result;
+}
+
+static void libpng_(memory_png_read_data)(png_structp png_ptr, png_bytep destination, size_t len)
+{
+    libpng_(PMemoryReader) reader = (libpng_(PMemoryReader)) png_get_io_ptr(png_ptr);
+
+    if (reader->offset + len > reader->len)
+        abort_("[read_png_str] Read error (overread)");
+
+    memcpy(destination, reader->data + reader->offset, len);
+    reader->offset += len;
+}
+
+
+static THTensor * libpng_(read_png_from_ptr)(png_structp png_ptr)
+{
+    int width, height;
+    png_byte color_type;
+    png_infop info_ptr;
+    png_bytep * row_pointers;
+    
+    info_ptr = png_create_info_struct(png_ptr);
+    if (!info_ptr)
+      abort_("[read_png_file] png_create_info_struct failed");
+
+    png_set_sig_bytes(png_ptr, PNG_HEADER_BYTES);
+
+    png_read_info(png_ptr, info_ptr);
+
+    width      = png_get_image_width(png_ptr, info_ptr);
+    height     = png_get_image_height(png_ptr, info_ptr);
+    color_type = png_get_color_type(png_ptr, info_ptr);
+    png_read_update_info(png_ptr, info_ptr);
+
+    /* get depth */
+    int depth = 0;
+    if (color_type == PNG_COLOR_TYPE_RGBA)
+      depth = 4;
+    else if (color_type == PNG_COLOR_TYPE_RGB)
+      depth = 3;
+    else if (color_type == PNG_COLOR_TYPE_GRAY)
+    {
+      if(png_get_bit_depth(png_ptr, info_ptr) < 8)
+      {
+        png_set_expand_gray_1_2_4_to_8(png_ptr);
+        png_read_update_info(png_ptr, info_ptr);
+      }
+      depth = 1;
+    }
+    else if (color_type == PNG_COLOR_TYPE_GA)
+      depth = 2;
+    else if (color_type == PNG_COLOR_TYPE_PALETTE)
+      {
+        depth = 3;
+        png_set_expand(png_ptr);
+        png_read_update_info(png_ptr, info_ptr);
+      }
+    else
+      abort_("[read_png_file] Unknown color space");
+
+    if(png_get_bit_depth(png_ptr, info_ptr) < 8)
+    {
+      png_set_strip_16(png_ptr);
+      png_read_update_info(png_ptr, info_ptr);
+    }
+
+    /* read file */
+    if (setjmp(png_jmpbuf(png_ptr)))
+       abort_("[read_png_file] Error during read_image");
+
+    /* alloc tensor */
+    THTensor *tensor = THTensor_(newWithSize3d)(depth, height, width);
+    real *tensor_data = THTensor_(data)(tensor);
+
+    /* alloc data in lib format */
+    row_pointers = (png_bytep*) malloc(sizeof(png_bytep) * height);
+    int y;
+    for (y=0; y<height; y++)
+      row_pointers[y] = (png_byte*) malloc(png_get_rowbytes(png_ptr,info_ptr));
+
+    /* read image in */
+    png_read_image(png_ptr, row_pointers);
+
+    /* convert image to dest tensor */
+    int x,k;
+    for (k=0; k<depth; k++) {
+      for (y=0; y<height; y++) {
+        png_byte* row = row_pointers[y];
+        for (x=0; x<width; x++) {
+          *tensor_data++ = (real)row[x*depth+k];
+          //png_byte val = row[x*depth+k];
+          //THTensor_(set3d)(tensor, k, y, x, (real)val);
+        }
+      }
+    }
+
+
+    /* cleanup heap allocation */
+    for (y=0; y<height; y++)
+      free(row_pointers[y]);
+    free(row_pointers);
+
+    /* cleanup png structs */
+    png_read_end(png_ptr, NULL);
+    png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+
+    return tensor;
+}
+
+static THTensor * libpng_(read_png_str)(const char *buffer, size_t len)
+{
+    png_byte header[PNG_HEADER_BYTES];
+    png_structp png_ptr;
+    
+    if (len < 8)
+        abort_("[read_png_str] Error reading header");
+
+    memcpy(header, buffer, PNG_HEADER_BYTES);
+    if (png_sig_cmp(header, 0, 8))
+        abort_("[read_png_str] String is not recognized as a PNG file");
+
+    libpng_(PMemoryReader) reader = libpng_(new_memory_reader)(buffer, len);
+
+    /* initialize stuff */
+    png_ptr = png_create_read_struct(PNG_LIBPNG_VER_STRING, NULL, NULL, NULL);
+    
+    if (!png_ptr)
+        abort_("[read_png_str] png_create_read_struct failed");
+    
+    png_set_read_fn(png_ptr, reader, libpng_(memory_png_read_data));
+    
+    THTensor * tensor = libpng_(read_png_from_ptr)(png_ptr);
+    free(reader);
+    return tensor;
+}
 
 static THTensor * libpng_(read_png_file)(const char *file_name)
 {
-  png_byte header[8];    // 8 is the maximum size that can be checked
-
-  int width, height;
-  png_byte color_type;
-  
+  png_byte header[PNG_HEADER_BYTES];    // 8 is the maximum size that can be checked
   png_structp png_ptr;
-  png_infop info_ptr;
-  png_bytep * row_pointers;
   size_t fread_ret;
 
    /* open file and test for it being a png */
   FILE *fp = fopen(file_name, "rb");
   if (!fp)
     abort_("[read_png_file] File %s could not be opened for reading", file_name);
-  fread_ret = fread(header, 1, 8, fp);
-  if (fread_ret != 8)
+  fread_ret = fread(header, 1, PNG_HEADER_BYTES, fp);
+  if (fread_ret != PNG_HEADER_BYTES)
     abort_("[read_png_file] File %s error reading header", file_name);
-  if (png_sig_cmp(header, 0, 8))
+  if (png_sig_cmp(header, 0, PNG_HEADER_BYTES))
     abort_("[read_png_file] File %s is not recognized as a PNG file", file_name);
 
   /* initialize stuff */
@@ -40,94 +190,13 @@ static THTensor * libpng_(read_png_file)(const char *file_name)
   if (!png_ptr)
     abort_("[read_png_file] png_create_read_struct failed");
 
-  info_ptr = png_create_info_struct(png_ptr);
-  if (!info_ptr)
-    abort_("[read_png_file] png_create_info_struct failed");
 
   if (setjmp(png_jmpbuf(png_ptr)))
     abort_("[read_png_file] Error during init_io");
 
   png_init_io(png_ptr, fp);
-  png_set_sig_bytes(png_ptr, 8);
 
-  png_read_info(png_ptr, info_ptr);
-
-  width      = png_get_image_width(png_ptr, info_ptr);
-  height     = png_get_image_height(png_ptr, info_ptr);
-  color_type = png_get_color_type(png_ptr, info_ptr);
-  png_read_update_info(png_ptr, info_ptr);
-
-  /* get depth */
-  int depth = 0;
-  if (color_type == PNG_COLOR_TYPE_RGBA)
-    depth = 4;
-  else if (color_type == PNG_COLOR_TYPE_RGB)
-    depth = 3;
-  else if (color_type == PNG_COLOR_TYPE_GRAY)
-  {
-    if(png_get_bit_depth(png_ptr, info_ptr) < 8)
-    {
-      png_set_expand_gray_1_2_4_to_8(png_ptr);
-      png_read_update_info(png_ptr, info_ptr);
-    }
-    depth = 1;
-  }
-  else if (color_type == PNG_COLOR_TYPE_GA)
-    depth = 2;
-  else if (color_type == PNG_COLOR_TYPE_PALETTE)
-    {
-      depth = 3;
-      png_set_expand(png_ptr);
-      png_read_update_info(png_ptr, info_ptr);
-    }
-  else
-    abort_("[read_png_file] Unknown color space");
-
-  if(png_get_bit_depth(png_ptr, info_ptr) < 8)
-  {
-    png_set_strip_16(png_ptr);
-    png_read_update_info(png_ptr, info_ptr);
-  }
-
-  /* read file */
-  if (setjmp(png_jmpbuf(png_ptr)))
-     abort_("[read_png_file] Error during read_image");
-
-  /* alloc tensor */
-  THTensor *tensor = THTensor_(newWithSize3d)(depth, height, width);
-  real *tensor_data = THTensor_(data)(tensor);
-
-  /* alloc data in lib format */
-  row_pointers = (png_bytep*) malloc(sizeof(png_bytep) * height);
-  int y;
-  for (y=0; y<height; y++)
-    row_pointers[y] = (png_byte*) malloc(png_get_rowbytes(png_ptr,info_ptr));
-
-  /* read image in */
-  png_read_image(png_ptr, row_pointers);
-
-  /* convert image to dest tensor */
-  int x,k;
-  for (k=0; k<depth; k++) {
-    for (y=0; y<height; y++) {
-      png_byte* row = row_pointers[y];
-      for (x=0; x<width; x++) {
-        *tensor_data++ = (real)row[x*depth+k];
-        //png_byte val = row[x*depth+k];
-        //THTensor_(set3d)(tensor, k, y, x, (real)val);
-      }
-    }
-  }
-
-
-  /* cleanup heap allocation */
-  for (y=0; y<height; y++)
-    free(row_pointers[y]);
-  free(row_pointers);
-
-  /* cleanup png structs */
-  png_read_end(png_ptr, NULL);
-  png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
+  THTensor * tensor = libpng_(read_png_from_ptr)(png_ptr);
 
   /* done with file */
   fclose(fp);
@@ -320,6 +389,14 @@ static int libpng_(Main_load)(lua_State *L) {
   return 1;
 }
 
+static int libpng_(Main_loads)(lua_State *L) {
+  size_t len;
+  const char *buffer = lua_tolstring(L, 1, &len);
+  THTensor *tensor = libpng_(read_png_str)(buffer, len);
+  luaT_pushudata(L, tensor, torch_Tensor);
+  return 1;
+}
+
 static int libpng_(Main_save)(lua_State *L) {
   const char *filename = luaL_checkstring(L, 1);
   THTensor *tensor = luaT_checkudata(L, 2, torch_Tensor);
@@ -330,6 +407,7 @@ static int libpng_(Main_save)(lua_State *L) {
 static const luaL_reg libpng_(Main__)[] =
 {
   {"load", libpng_(Main_load)},
+  {"loads", libpng_(Main_loads)},
   {"size", libpng_(Main_size)},
   {"save", libpng_(Main_save)},
   {NULL, NULL}
