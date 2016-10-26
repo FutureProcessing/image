@@ -1,8 +1,7 @@
-require 'totem'
 require 'image'
 
-myTests = {}
-local tester = totem.Tester()
+myTests = torch.TestSuite()
+local tester = torch.Tester()
 
 
 -- List of all possible tests
@@ -74,4 +73,4 @@ end
 
 
 tester:add(myTests)
-return tester:run(myTests)
+return tester:run()

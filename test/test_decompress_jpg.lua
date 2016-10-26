@@ -1,6 +1,6 @@
 require 'image'
 require 'paths'
-gm = require 'graphicsmagick'
+gm_available, gm = pcall(require, 'graphicsmagick')
 
 torch.setdefaulttensortype('torch.DoubleTensor')
 torch.setnumthreads(4)
@@ -8,7 +8,7 @@ torch.setnumthreads(4)
 -- Create an instance of the test framework
 local mytester = torch.Tester()
 local precision = 1e-6
-local test = {}
+local test = torch.TestSuite()
 
 function test.CompareLoadAndDecompress()
   -- This test breaks if someone removes lena from the repo
@@ -22,11 +22,13 @@ function test.CompareLoadAndDecompress()
   
   -- Make sure the returned image width and height match the height and width
   -- reported by graphicsmagick (just a sanity check)
-  local info = gm.info(imfile)
-  local w = info.width
-  local h = info.height
-  mytester:assert(w == img:size(3), 'image dimension error ')
-  mytester:assert(h == img:size(3), 'image dimension error ')
+  if gm_available then
+    local info = gm.info(imfile)
+    local w = info.width
+    local h = info.height
+    mytester:assert(w == img:size(3), 'image dimension error ')
+    mytester:assert(h == img:size(3), 'image dimension error ')
+  end
   
   -- Now load the raw binary from the source file into a ByteTensor
   local fin = torch.DiskFile(imfile, 'r')

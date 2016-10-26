@@ -1,3 +1,6 @@
+--[[
+Not a unittest. Benchmark program for gaussian filtering.
+]]
 require 'image'
 
 -- Just create 2 gaussians images/kernels: 

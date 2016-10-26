@@ -1,3 +1,10 @@
+--[[
+    This is not a unittest file. It's an example program.
+   It requires `qtlua` module, and needs to be run using `qlua` interpreter:
+   https://github.com/torch/image/blob/master/doc/gui.md
+   https://github.com/torch/qtlua/blob/master/doc/qt.md
+]]
+
 require 'image'
 torch.setdefaulttensortype('torch.FloatTensor')
 torch.setnumthreads(16)
