@@ -13,5 +13,6 @@ return tester:run()
 ]]
 
 dofile 'test_decompress_jpg.lua'
+dofile 'test_png_memory.lua'
 dofile 'test_ppm.lua'
 dofile 'test_vflip.lua'
