@@ -1,8 +1,7 @@
-require 'totem'
 require 'image'
 
-myTests = {}
-local tester = totem.Tester()
+myTests = torch.TestSuite()
+local tester = torch.Tester()
 
 function myTests.test_ppmload()
     -- test.ppm is a 100x1 "French flag" like image, i.e the first pixel is blue
@@ -19,4 +18,4 @@ function myTests.test_ppmload()
 end
 
 tester:add(myTests)
-return tester:run(myTests)
+return tester:run()
