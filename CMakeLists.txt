@@ -3,7 +3,11 @@ CMAKE_POLICY(VERSION 2.6)
 
 FIND_PACKAGE(Torch REQUIRED)
 FIND_PACKAGE(JPEG QUIET)
-FIND_PACKAGE(PNG QUIET)
+FIND_PACKAGE(PNG)
+
+if(MSVC)
+    add_definitions(/D_CRT_SECURE_NO_DEPRECATE /wo4244 /wo4018)
+endif(MSVC)
 
 SET(src ppm.c)
 ADD_TORCH_PACKAGE(ppm "${src}" "${luasrc}" "Image Processing")
