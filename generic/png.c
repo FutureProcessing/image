@@ -17,12 +17,8 @@
 #include <lualib.h>
 
 /* MSVC (in C mode at least) doesn't see static const int as `constant expression' */
-#ifndef _MSC_VER
-    static const int PNG_HEADER_BYTES = 8;
-#else
-#    ifndef PNG_HEADER_BYTES
-#        define PNG_HEADER_BYTES 8
-#    endif
+#ifndef PNG_HEADER_BYTES
+#define PNG_HEADER_BYTES 8
 #endif
 
 typedef struct libpng_(SMemoryReader)
